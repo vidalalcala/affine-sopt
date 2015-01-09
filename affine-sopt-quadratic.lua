@@ -51,7 +51,7 @@ print(Sigma)
 print('alphaOptimal : ')
 print(alphaOptimal)
 
--- construct the stochastic gradient sample
+-- construct the stochastic gradient sampler
 function  stochasticGradientQuadratic(alpha)
   local Z = torch.Tensor(1, p)
   randomkit.normal(Z, 0, 1)
@@ -78,28 +78,30 @@ local P = torch.inverse( X:t() * X )
 local B = P * (X:t() * Y)
 local G = torch.inverse(B[{{1,p},{}}])
 
+-- 
 function addObservation(x, y)
   n = n + 1
   x = torch.cat(x, torch.ones(1,1), 2)
-  local alpha = 1.0/(x * P * x:t() + 1.0)
+  local b = (x * P * x:t() + 1.0)
+  local alpha = torch.inverse(b)
   local u = P * x:t()
   u = u[{{1,p},{}}]
-  u = alpha * u
+  u:mul(alpha[1][1])
   local v = y - x * B
   v = v:t()
-  B = B + alpha * (P * x:t() * (y - x * B) )
-  P = P - alpha * ( P * x:t() * x * P:t() )
-  local beta = 1.0/( 1.0 + v:t() * G * u)
-  G = G - beta * (G * u * v:t() * G)
+  BAdd = (P * x:t()) * (y - x * B)
+  BAdd:mul(alpha[1][1])
+  B = B + BAdd
+  PAdd = ( P * x:t() * x * P:t() )
+  PAdd:mul(- alpha[1][1])
+  P = P + PAdd
+  b = ( v:t() * G * u + 1.0)
+  local beta = torch.inverse(b)
+  GAdd = (G * u * v:t() * G)
+  GAdd:mul(beta[1][1])
+  G = G + GAdd
 end
 
-print(G)
-
-local x = torch.rand(1, p)
-local y = stochasticGradientQuadratic(x)
-
-addObservation(x, y)
-
-print(G)
+--
 
 
