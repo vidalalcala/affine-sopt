@@ -5,10 +5,9 @@
 -- function described by LeCun, Zhang and Schaul (2013) "No More Pesky Learning
 -- Rates." .
 
-
-require 'torch'
 require 'pl'
 require 'cutorch'
+require 'randomkit'
 
 -- Use CUDA
 -- print( cutorch.getDeviceProperties(cutorch.getDevice()) )
@@ -30,94 +29,77 @@ torch.manualSeed(123)
 
 -- Create synthetic data
 local p = opt.nbPar
+local n = p + 1      --required for full rank initialization
 local N = opt.nbIter
 
-local X = torch.rand(N, p)
 local H = torch.rand(p, p)
 H = ( H:t() + H )
 H:mul(0.5)
 local Sigma = torch.rand(p, p)
 Sigma = ( Sigma:t() + Sigma )
 Sigma:mul(0.5)
-local theta = torch.rand(p)
-local Y = torch.Tensor(N, p)
-local Z = torch.randn(N,p)
+local alphaOptimal = torch.rand(1, p)
 
--- generate synthetis responses
-Y = X * H - Z * Sigma * H
-for i = 1, N, 1 do
-  Y:select(1, i):addmv(H, theta)
+-- print problem setup
+print('H : ')
+print(H)
+local HInverse = torch.inverse(H)
+print('HInverse : ')
+print(HInverse)
+print('Sigma : ')
+print(Sigma)
+print('alphaOptimal : ')
+print(alphaOptimal)
+
+-- construct the stochastic gradient sample
+function  stochasticGradientQuadratic(alpha)
+  local Z = torch.Tensor(1, p)
+  randomkit.normal(Z, 0, 1)
+  local estimator = alpha * H - (Z * Sigma) * H - alphaOptimal * H
+  return estimator
 end
 
--- Initialize the OLS estimator with p+1 observations.
-sgdolsState = sgdolsState or {
-            n = p + 1,
-            parametersMean = torch.Tensor(nbPar):zero(),
-            evalCounter = 0
-            }
-X = torch.cat(X, torch.ones(N, 1), 2) 
-local P = torch.inverse(X:t() * X)
+-- generate first n = p + 1 states randomly
+local X = torch.rand(n, p)
+
+print(X)
+
+-- Initialize the estimators
+local Y = torch.Tensor(n, p)
+for i = 1, n, 1 do
+  local alpha = torch.Tensor(1, p)
+  alpha:copy(X[{i,{}}])
+  local gradAlpha = stochasticGradientQuadratic(alpha)
+  Y[{i,{}}] = gradAlpha
+end
+
+local X = torch.cat(X , torch.ones(n, 1), 2)
+local P = torch.inverse( X:t() * X )
 local B = P * (X:t() * Y)
 local G = torch.inverse(B[{{1,p},{}}])
-print('B : ')
-print(B)
-print('G : ')
-print(G)
 
-function SeqOls.addObservation(y, x, state)
-
+function addObservation(x, y)
+  n = n + 1
+  x = torch.cat(x, torch.ones(1,1), 2)
+  local alpha = 1.0/(x * P * x:t() + 1.0)
+  local u = P * x:t()
+  u = u[{{1,p},{}}]
+  u = alpha * u
+  local v = y - x * B
+  v = v:t()
+  B = B + alpha * (P * x:t() * (y - x * B) )
+  P = P - alpha * ( P * x:t() * x * P:t() )
+  local beta = 1.0/( 1.0 + v:t() * G * u)
+  G = G - beta * (G * u * v:t() * G)
 end
 
+print(G)
+
+local x = torch.rand(1, p)
+local y = stochasticGradientQuadratic(x)
+
+addObservation(x, y)
+
+print(G)
 
 
-
--- 
-
---[[
-int main (int argc, char * const argv[])
-{
-    //Initialize the random number generator
-	mt19937 generator;
-    normal_distribution<double> normalSample(0.0,1.0);
-    
-    // Create synthetic data
-    int p = 4 ;                         // # of parameters
-    int n = 1000000 ;                     // # of samples
-    mat X = randu<mat>(n,p) ;           // The matrix of predictors
-    mat H = randu<mat>(p,p) ;           // The Hessian matrix for the quadratic loss
-    H = 0.5 * ( H.t() + H ) ;           // Hessian is symmetric
-    mat Sigma = randu<mat>(p,p) ;       // The covariance matrix for the quadratic loss
-    Sigma = 0.5 * ( Sigma.t() + Sigma ) ;// Covariance is symmetric
-    mat theta = randu<mat>(1,p) ;       // The parameter we will try to estimate
-    mat Y(n,p) ;                        // The matrix of responses
-    mat Z(n,p) ;                        // Matrix with standard normal entries
-    
-    // Create a n x p matrix with standard normal entries
-    for (int i = 0 ; i < n ; i++){
-            for (int j = 0 ; j < p ; j++){
-                Z(i,j) = normalSample(generator) ;
-            }
-    }
-    
-    //Generate synthetic responses
-    Y = X * H - Z * Sigma * H ;
-    for ( int i = 0 ; i < n ; i++){
-        Y.row(i) = Y.row(i) + theta * H  ;
-    }
-    H.print("H: ") ;
-    
-    // Initialize the OLS estimator with p+1 observations.
-    SeqOls Estimator ;
-    Estimator.useObservations( X.rows(0,p) , Y .rows(0,p) ) ;
-    Estimator.printEstimator() ;
-    
-    // Add the rest of the observations sequentially.
-    for  ( int i = p + 1 ; i < n ; i++){
-        Estimator.addObservation( X.row(i) , Y.row(i) ) ;
-    }
-    
-    //Print the estimator
-    Estimator.printEstimator() ;
-    Estimator.testInverse();
-}
-]]
