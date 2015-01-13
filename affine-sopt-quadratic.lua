@@ -17,7 +17,7 @@ require 'randomkit'
 local opt = lapp([[
    -t,--threads  (default 7)         number of threads
    -p,--nbPar    (default 4) 	     number of parameters
-   -N,--nbIter   (default 20)        number of iterations
+   -N,--nbIter   (default 1000)        number of iterations
    -g,--gamma    (default 0.6)       power lag
 ]])
 
@@ -43,13 +43,13 @@ local alphaOptimal = torch.rand(1, p)
 -- print problem setup
 print('H : ')
 print(H)
-print(torch.symeig(H))
+--print(torch.symeig(H))
 local HInverse = torch.inverse(H)
 print('HInverse : ')
 print(HInverse)
 print('Sigma : ')
 print(Sigma)
-print(torch.symeig(Sigma))
+--print(torch.symeig(Sigma))
 print('alphaOptimal : ')
 print(alphaOptimal)
 
@@ -57,14 +57,14 @@ print(alphaOptimal)
 function  stochasticGradientQuadratic(alpha)
   local Z = torch.Tensor(1, p)
   randomkit.normal(Z, 0, 1)
-  local estimator = alpha * H - (Z * Sigma) * H - alphaOptimal * H
+  local estimator = (alpha - alphaOptimal) * H - (Z * Sigma) * H 
   return estimator
 end
 
 -- generate first nInit = p + 1 states randomly
 local X = torch.rand(nInit, p)
-print('X : ')
-print(X)
+--print('X : ')
+--print(X)
 
 -- generate first nInit = p + 1 gradient observations
 local Y = torch.Tensor(nInit, p)
@@ -75,8 +75,8 @@ for i = 1, nInit, 1 do
   Y[{i,{}}] = gradAlpha
 end
 
-print('Y : ')
-print(Y)
+--print('Y : ')
+--print(Y)
 
 -- Use first n = p +1 observations to construct initial estimators
 local n = nInit
@@ -98,16 +98,16 @@ function addObservation(x, y)
   u:mul(alpha[1][1])
   local v = y - x * B
   v = v:t()
-  BAdd = (P * x:t()) * (y - x * B)
+  BAdd = P * x:t() * (y - x * B)
   BAdd:mul(alpha[1][1])
   B = B + BAdd
-  PAdd = ( P * x:t() * x * P:t() )
+  PAdd =  P * x:t() * x * P:t() 
   PAdd:mul(- alpha[1][1])
   P = P + PAdd
   b = ( v:t() * G * u + 1.0)
   local beta = torch.inverse(b)
   GAdd = (G * u * v:t() * G)
-  GAdd:mul(beta[1][1])
+  GAdd:mul(-beta[1][1])
   G = G + GAdd
   HEstimator = G + G:t()
   HEstimator:mul(0.5)
@@ -115,13 +115,13 @@ end
 
 
 -- Initial estimator
-print('initial H inverse estimator : ')
-print(HEstimator)
+--print('initial H inverse estimator : ')
+--print(HEstimator)
 -- Initial estimator
-print('initial B estimator : ')
-print(B)
+--print('initial B estimator : ')
+--print(B)
 
--- Perform Robbins-Monro with OLS
+-- Perform Affine Invariant Stochastic Optimization
 local alpha = torch.rand(1, p)
 local alphaNew = torch.Tensor(1, p)
 local gradAlpha = stochasticGradientQuadratic(alpha)
